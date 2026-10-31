@@ -82,12 +82,6 @@ textarea.t{min-height:120px;resize:vertical;font-size:13.5px;line-height:1.6}
 .hostbar{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
 .guess{display:flex;gap:8px;margin-top:12px}
 .guess input{flex:1}
-.choices{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
-.choices button{padding:16px 12px;border-radius:var(--r-md);border:1px solid var(--line-strong);background:var(--surface-2);font-size:17px;font-weight:700}
-.choices button:hover:not(:disabled){border-color:var(--brand)}
-.choices button.picked{border-color:var(--brand);background:var(--brand-soft)}
-.choices button.right{border-color:var(--good);background:var(--good-soft);color:var(--good)}
-.choices button.wrong{border-color:var(--bad);background:var(--bad-soft);color:var(--bad)}
 .myres{margin-top:10px;font-weight:700;min-height:22px}
 .myres.ok{color:var(--good)} .myres.no{color:var(--bad)}
 .rail .card{padding:14px}
@@ -188,8 +182,6 @@ dialog::backdrop{background:rgba(0,0,0,.65)}
           <div class="seg" id="segRounds"></div>
           <label class="f">한 번에 듣는 시간</label>
           <div class="seg" id="segLen"></div>
-          <label class="f">답하는 방식</label>
-          <div class="seg" id="segMode"></div>
           <label class="f">제한 시간</label>
           <div class="seg" id="segTime"></div>
           <button class="btn primary big" id="startBtn">게임 시작</button>
@@ -208,7 +200,7 @@ dialog::backdrop{background:rgba(0,0,0,.65)}
       <div>
         <div class="status">
           <span class="q" id="qNum">1 / 10</span>
-          <span class="pill" id="qMode">주관식</span>
+          <span class="pill">먼저 맞히는 사람이 1점</span>
           <span class="timer" id="qTimer"></span>
         </div>
         <div class="stage" id="stage">
@@ -233,7 +225,6 @@ dialog::backdrop{background:rgba(0,0,0,.65)}
             <input class="t" id="guessInput" placeholder="누구 목소리일까요? 이름 입력 후 Enter" maxlength="30">
             <button class="btn primary" type="submit">제출</button>
           </form>
-          <div class="choices" id="choices" hidden></div>
           <div class="myres" id="myRes"></div>
         </div>
       </div>
@@ -468,7 +459,7 @@ function startClip(w){
   const t0=performance.now(), total=(w.len||5)*1000;
   clipT=setInterval(()=>{ const el=performance.now()-t0; $("clipFill").style.width=Math.min(100,el/total*100)+"%";
     if(el>=total){ clearInterval(clipT); player.pauseVideo(); $("stage").classList.remove("playing");
-      if(previewing){ previewing=false; } else if(!revealed) setCover("누구 목소리일까요?", game.mode==="choice"?"아래에서 골라 주세요":"이름을 입력해 보세요"); } },60);
+      if(previewing){ previewing=false; } else if(!revealed) setCover("누구 목소리일까요?","먼저 맞히는 사람이 이겨요!"); } },60);
 }
 function showTap(why){ $("tapPlay").hidden=false; if(!revealed) setCover(why,"아래 버튼을 눌러 주세요"); }
 $("tapPlay").onclick=()=>{ $("tapPlay").hidden=true; if(!ytReady) return; player.unMute(); player.setVolume(100);
@@ -494,7 +485,7 @@ class MockPeer{ constructor(id){ this.id=id||("g"+Math.random().toString(36).sli
 function makePeer(id){ if(params.get("mock")) return new MockPeer(id); if(typeof Peer==="undefined") throw new Error("nolib"); return id?new Peer(id,{debug:0}):new Peer({debug:0}); }
 
 let role=null, peer=null, hostConn=null, myName="";
-const SETTINGS_DEF={rounds:10,len:5,mode:"text",time:20};
+const SETTINGS_DEF={rounds:10,len:5,time:20};
 const cfg={...SETTINGS_DEF,...store.get("vq-cfg",{})};
 const room={code:"",players:new Map(),deck:[],idx:0,phase:"lobby",round:null};
 const game={n:0,total:0,mode:"text",vid:null,solved:false,picked:null};
@@ -530,7 +521,6 @@ function renderSettings(){
   const n=playable().length;
   seg("segRounds","rounds",[[5,"5문제"],[10,"10문제"],[15,"15문제"],[20,"20문제"],[999,`전부 (${n})`]]);
   seg("segLen","len",[[3,"3초"],[5,"5초"],[8,"8초"],[12,"12초"]]);
-  seg("segMode","mode",[["text","주관식 (이름 입력)"],["choice","객관식 (4지선다)"]]);
   seg("segTime","time",[[15,"15초"],[20,"20초"],[30,"30초"],[45,"45초"]]);
 }
 function liveP(){ return [...room.players.entries()].filter(([,p])=>!p.left); }
@@ -549,7 +539,6 @@ function hostHandle(pid,d,conn){
       break; }
     case "chat": if(p) broadcast({t:"feed",k:"chat",name:p.name,text:String(d.text).slice(0,80)}); break;
     case "guess": if(p) hostGuess(pid,String(d.text||"").slice(0,30)); break;
-    case "pick": if(p) hostPick(pid,+d.i); break;
     case "ready": if(room.round&&p) room.round.ready.add(pid); break;
     case "bad": if(room.round&&room.phase==="q"&&d.vid===room.round.vid) hostBad(d.why); break;
   }
@@ -570,9 +559,7 @@ async function hostNewRound(retry=0){
   let pick=null, lastErr="";
   for(const s of srcs){ try{ pick=await resolvePick(s); break; }catch(e){ lastErr=e.message; } }
   if(!pick){ sys(`${st.name}의 클립을 불러오지 못해 다른 사람으로 바꿔요 (${lastErr})`); return hostSwap(retry); }
-  let choices=null;
-  if(room.settings.mode==="choice"){ const others=shuffle(LIB.filter(x=>x!==st&&norm(x.name)!==norm(st.name))).slice(0,3).map(x=>x.name); choices=shuffle([st.name,...others]); }
-  room.round={st,vid:pick.vid,start:pick.start,frac:randFrac(),len:room.settings.len,solved:[],picks:new Map(),choices,ready:new Set(),retry,lastPlay:null};
+  room.round={st,vid:pick.vid,start:pick.start,frac:randFrac(),len:room.settings.len,solved:[],ready:new Set(),retry,lastPlay:null};
   room.phase="q";
   broadcast(qMsg()); hostBoard();
   const r=room.round;
@@ -582,31 +569,23 @@ async function hostNewRound(retry=0){
 }
 function hostSwap(retry){ if(retry>=4||room.deck.length<=1){ sys("재생 가능한 클립이 부족해서 이 문제는 건너뛰어요"); return hostAdvance(); }
   const pool=playable().filter(s=>!room.deck.includes(s)); if(pool.length) room.deck[room.idx]=pool[Math.floor(Math.random()*pool.length)]; return hostNewRound(retry+1); }
-function qMsg(){ const r=room.round; return {t:"q",n:room.idx+1,total:room.deck.length,mode:room.settings.mode,vid:r.vid,choices:r.choices,len:r.len}; }
+function qMsg(){ const r=room.round; return {t:"q",n:room.idx+1,total:room.deck.length,vid:r.vid,len:r.len}; }
 function hostPlay(extend){ const r=room.round; if(!r) return; const m={start:r.start,frac:r.frac,len:r.len,extend:!!extend}; r.lastPlay={...m,extend:false}; broadcast({t:"play",...m}); }
 function startTimer(r){ r.endAt=Date.now()+room.settings.time*1000+r.len*1000; broadcast({t:"timer",ms:room.settings.time*1000+r.len*1000});
   r.endT=setTimeout(()=>{ if(room.round===r&&room.phase==="q") hostReveal(); },room.settings.time*1000+r.len*1000); }
 function clearRoundTimers(){ const r=room.round; if(r){ clearInterval(r.waitT); clearTimeout(r.endT); } }
-function points(r,first){ const left=Math.max(0,(r.endAt||Date.now())-Date.now()), tot=(room.settings.time+r.len)*1000; return 100+Math.round(100*left/tot)+(first?50:0); }
 function hostGuess(pid,text){
   const r=room.round, p=room.players.get(pid); if(!p) return;
-  if(r&&room.phase==="q"&&r.solved.includes(pid)&&nearAnswer(r.st,text)) return;
-  if(!r||room.phase!=="q"||room.settings.mode!=="text"||r.solved.includes(pid)){ broadcast({t:"feed",k:"chat",name:p.name,text}); return; }
-  if(isCorrect(r.st,text)){ const pts=points(r,r.solved.length===0); p.score+=pts; r.solved.push(pid);
-    broadcast({t:"feed",k:"good",text:`${p.name}님 정답! +${pts}`}); sendTo(pid,{t:"you",ok:true,pts}); hostBoard(); checkAll(); }
+  if(!r||room.phase!=="q"){ if(!(r&&nearAnswer(r.st,text))||room.phase==="reveal") broadcast({t:"feed",k:"chat",name:p.name,text}); return; }
+  if(isCorrect(r.st,text)){ // first correct answer takes the round
+    p.score+=1; r.solved.push(pid); r.winner=p.name;
+    broadcast({t:"feed",k:"good",text:`${p.name}님이 먼저 맞혔어요! +1`}); sendTo(pid,{t:"you",ok:true}); hostReveal(); }
   else { if(!nearAnswer(r.st,text)) broadcast({t:"feed",k:"chat",name:p.name,text}); sendTo(pid,{t:"you",ok:false}); }
 }
-function hostPick(pid,i){ const r=room.round, p=room.players.get(pid); if(!r||room.phase!=="q"||!r.choices||r.picks.has(pid)) return;
-  r.picks.set(pid,i); const ok=r.choices[i]===r.st.name;
-  if(ok){ const pts=points(r,r.solved.length===0); p.score+=pts; r.solved.push(pid); p.lastPts=pts; }
-  sys(`${p.name}님이 골랐어요`); checkAll(); }
-function checkAll(){ const r=room.round; const done=liveP().every(([pid])=>r.solved.includes(pid)||(r.choices&&r.picks.has(pid)));
-  if(done) setTimeout(()=>{ if(room.round===r&&room.phase==="q") hostReveal(); },900); }
 function hostBad(why){ const r=room.round; if(r.badOnce) return; r.badOnce=true; sys(`이 영상은 재생이 안 돼요 (${why}) → 다른 클립으로 바꿔요`); hostNewRound(r.retry+1); }
 function revealMsg(){ const r=room.round; const url=`https://youtu.be/${r.vid}${r.start!=null?"?t="+Math.floor(r.start):""}`;
-  return {t:"reveal",name:r.st.name,url,solved:r.solved.map(id=>room.players.get(id)?.name).filter(Boolean),answerI:r.choices?r.choices.indexOf(r.st.name):-1,last:room.idx>=room.deck.length-1}; }
+  return {t:"reveal",name:r.st.name,url,winner:r.winner||"",last:room.idx>=room.deck.length-1}; }
 function hostReveal(){ const r=room.round; if(!r||room.phase!=="q") return; clearRoundTimers(); room.phase="reveal";
-  if(r.choices){ for(const [pid,i] of r.picks){ const p=room.players.get(pid); if(p) sendTo(pid,{t:"you",ok:r.choices[i]===r.st.name,pts:p.lastPts||0}); if(p) p.lastPts=0; } }
   broadcast(revealMsg()); hostBoard(); }
 function hostAdvance(){ room.idx++; if(room.idx>=room.deck.length) return hostEnd(); hostNewRound(); }
 function hostEnd(){ clearRoundTimers(); room.phase="end"; room.round=null; broadcast({t:"end",rank:liveP().map(([,p])=>({name:p.name,score:p.score})).sort((a,b)=>b.score-a.score)}); }
@@ -647,33 +626,29 @@ function clientHandle(m){
     case "start": $("feed").innerHTML=""; break;
     case "toLobby": show("lobby"); if(role==="host"){ renderSettings(); hostLobby(); } break;
     case "q":
-      show("game"); revealed=false; game.n=m.n; game.total=m.total; game.mode=m.mode; game.vid=m.vid; game.solved=false; game.picked=null;
-      $("qNum").textContent=`${m.n} / ${m.total}`; $("qMode").textContent=m.mode==="choice"?"객관식":"주관식";
+      show("game"); revealed=false; game.n=m.n; game.total=m.total; game.vid=m.vid; game.solved=false;
+      $("qNum").textContent=`${m.n} / ${m.total}`;
       $("qTimer").textContent=""; clearInterval(timerIv); $("myRes").textContent=""; $("myRes").className="myres";
       setCover("준비 중…","모두의 플레이어가 준비되면 시작해요"); $("stage").classList.remove("playing");
       $("hostBar").hidden=role!=="host"; $("hNext").hidden=true; ["hReplay","hLonger","hOther","hReveal"].forEach(id=>$(id).hidden=false);
-      $("guessForm").hidden=m.mode==="choice"; $("choices").hidden=m.mode!=="choice";
       $("guessInput").disabled=false; $("guessInput").value="";
-      if(m.choices) $("choices").innerHTML=m.choices.map((c,i)=>`<button type="button" data-i="${i}">${esc(c)}</button>`).join("");
       prepare(m.vid);
-      if(m.mode!=="choice") setTimeout(()=>$("guessInput").focus(),50);
+      setTimeout(()=>$("guessInput").focus(),50);
       break;
     case "play": if(!revealed) playReq(m); break;
     case "timer": { const end=Date.now()+m.ms; clearInterval(timerIv);
       const tick=()=>{ const s=Math.max(0,Math.ceil((end-Date.now())/1000)); $("qTimer").textContent=s+"초"; $("qTimer").classList.toggle("low",s<=5); if(s<=0) clearInterval(timerIv); };
       tick(); timerIv=setInterval(tick,250); break; }
     case "you":
-      if(m.ok){ game.solved=true; $("myRes").textContent=`정답! +${m.pts}점`; $("myRes").className="myres ok"; $("guessInput").disabled=true; }
-      else if(game.mode==="text"){ $("myRes").textContent="땡! 다시 해 보세요"; $("myRes").className="myres no"; setTimeout(()=>{ if(!game.solved&&$("myRes").textContent.startsWith("땡")) $("myRes").textContent=""; },1400); }
-      else { $("myRes").textContent="아쉬워요!"; $("myRes").className="myres no"; }
+      if(m.ok){ game.solved=true; $("myRes").textContent="🏆 내가 제일 먼저 맞혔어요! +1점"; $("myRes").className="myres ok"; }
+      else if(!revealed){ $("myRes").textContent="땡! 다시 해 보세요"; $("myRes").className="myres no"; setTimeout(()=>{ if(!game.solved&&$("myRes").textContent.startsWith("땡")) $("myRes").textContent=""; },1400); }
       break;
     case "reveal":
       revealed=true; clearInterval(timerIv); $("qTimer").textContent="";
       $("coverMsg").innerHTML=`<span class="answerName">${esc(m.name)}</span>`;
-      $("coverSub").innerHTML=(m.solved.length?`맞힌 사람: ${esc(m.solved.join(", "))}`:"아무도 못 맞혔어요")+` · <a href="${esc(m.url)}" target="_blank" rel="noopener" style="color:var(--brand)">원본 영상</a>`;
+      $("coverSub").innerHTML=(m.winner?`🏆 ${esc(m.winner)} 승리`:"아무도 못 맞혔어요")+` · <a href="${esc(m.url)}" target="_blank" rel="noopener" style="color:var(--brand)">원본 영상</a>`;
       $("guessInput").disabled=true;
-      if(m.answerI>=0) [...$("choices").children].forEach((b,i)=>{ b.disabled=true; if(i===m.answerI) b.classList.add("right"); else if(i===game.picked) b.classList.add("wrong"); });
-      if(game.mode==="text"&&!game.solved){ $("myRes").textContent=""; }
+      if(!game.solved){ $("myRes").textContent=m.winner?`${m.winner}님이 먼저 맞혔어요`:""; $("myRes").className="myres no"; }
       if(lastPlay&&ready){ doPlay({...lastPlay,extend:false,reveal:true,len:Math.max(6,lastPlay.len)}); }
       if(role==="host"){ ["hReplay","hLonger","hOther","hReveal"].forEach(id=>$(id).hidden=true); $("hNext").hidden=false; $("hNext").textContent=m.last?"결과 보기 →":"다음 문제 →"; }
       sys2(`정답: ${m.name}`); break;
@@ -692,8 +667,6 @@ function addFeed(m){ const d=document.createElement("div");
   $("feed").appendChild(d); while($("feed").children.length>200) $("feed").firstChild.remove(); feedBottom(); }
 function feedBottom(){ const f=$("feed"); f.scrollTop=f.scrollHeight; }
 $("guessForm").onsubmit=e=>{ e.preventDefault(); const v=$("guessInput").value.trim(); if(!v) return; $("guessInput").value=""; sendUp({t:"guess",text:v}); };
-$("choices").onclick=e=>{ const b=e.target.closest("button"); if(!b||game.picked!=null||revealed) return; game.picked=+b.dataset.i; b.classList.add("picked");
-  [...$("choices").children].forEach(x=>x.disabled=true); $("myRes").textContent="선택 완료! 정답 공개를 기다려요"; $("myRes").className="myres"; sendUp({t:"pick",i:game.picked}); };
 $("chatForm").onsubmit=e=>{ e.preventDefault(); const v=$("chatInput").value.trim(); if(!v) return; $("chatInput").value=""; sendUp({t:"chat",text:v}); };
 $("copyLink").onclick=async()=>{ const url=location.origin+location.pathname+"?room="+room.code+(params.get("mock")?"&mock=1":"");
   const code=$("lobbyCode").textContent; const link=role==="host"?url:location.origin+location.pathname+"?room="+code;
