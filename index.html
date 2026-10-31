@@ -276,7 +276,8 @@ dialog::backdrop{background:rgba(0,0,0,.65)}
     <div class="howto">
       한 줄에 한 명씩 붙여넣으세요: <code>이름 | 별칭1, 별칭2 | 유튜브링크 유튜브링크 …</code><br>
       • 링크에 <code>?t=95</code>처럼 시간이 있으면 <b>그 지점부터</b>, 없으면 영상 안에서 <b>랜덤 구간</b>을 틀어요.<br>
-      • <b>재생목록 링크</b>(<code>playlist?list=…</code>)를 넣으면 그 안의 영상 중 하나를 랜덤으로 골라요 → 스트리머당 링크 하나로 끝!<br>
+      • <b>채널 링크</b>(<code>youtube.com/channel/UC…</code>)나 <b>재생목록 링크</b>를 넣으면 그 안의 영상 중 하나를 랜덤으로 골라요 → 스트리머당 링크 하나로 끝!<br>
+      &nbsp;&nbsp;채널 링크 얻는 법: 유튜브 채널 → 설명(더보기) → <b>채널 공유 → 채널 ID 복사</b> (UC로 시작하는 글자를 그대로 붙여넣어도 돼요)<br>
       • 같은 이름을 다시 넣으면 링크가 추가돼요. 별칭은 정답으로 인정할 다른 이름이에요 (생략 가능).<br>
       • 여기서 고친 건 이 브라우저에만 저장돼요. 친구 PC에서도 방장을 하려면 <b>내보내기</b>한 clips.json을 GitHub 레포에 올리세요.
     </div>
@@ -312,6 +313,7 @@ function parseTime(s){ if(!s) return null; s=String(s).trim(); if(/^\d+$/.test(s
 function parseSource(raw){
   raw=(raw||"").trim(); if(!raw) return null;
   if(/^[\w-]{11}$/.test(raw)) return {type:"video",vid:raw,start:null};
+  if(/^UC[\w-]{22}$/.test(raw)) return {type:"list",list:"UU"+raw.slice(2)};
   let u; try{ u=new URL(raw.startsWith("http")?raw:"https://"+raw); }catch(e){ return null; }
   const host=u.hostname.replace(/^www\.|^m\.|^music\./,"");
   let vid=null;
@@ -319,13 +321,14 @@ function parseSource(raw){
   else if(host==="youtube.com"||host==="youtube-nocookie.com"){
     vid=u.searchParams.get("v");
     const m=u.pathname.match(/^\/(?:shorts|live|embed|v)\/([\w-]{11})/); if(m) vid=m[1];
+    const ch=u.pathname.match(/^\/channel\/(UC[\w-]{22})/); if(ch) return {type:"list",list:"UU"+ch[1].slice(2)}; // channel → its uploads
     if(!vid && u.searchParams.get("list")) return {type:"list",list:u.searchParams.get("list")};
   } else return null;
   if(!vid||!/^[\w-]{11}$/.test(vid)) return null;
   const start=parseTime(u.searchParams.get("t")||u.searchParams.get("start")||(u.hash.match(/t=([\dhms]+)/)||[])[1]);
   return {type:"video",vid,start:start||start===0?start:null};
 }
-function srcLabel(s){ const p=parseSource(s); if(!p) return {tag:"?",cls:"rand"}; if(p.type==="list") return {tag:"재생목록",cls:"list"}; return p.start!=null?{tag:fmtT(p.start)+"부터",cls:""}:{tag:"랜덤 구간",cls:"rand"}; }
+function srcLabel(s){ const p=parseSource(s); if(!p) return {tag:"?",cls:"rand"}; if(p.type==="list") return {tag:p.list.startsWith("UU")?"채널 전체":"재생목록",cls:"list"}; return p.start!=null?{tag:fmtT(p.start)+"부터",cls:""}:{tag:"랜덤 구간",cls:"rand"}; }
 function fmtT(s){ s=Math.floor(s); const h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60; return (h?h+":"+String(m).padStart(2,"0"):m)+":"+String(x).padStart(2,"0"); }
 async function loadLib(){
   const local=store.get("vq-lib",null);

@@ -1,3 +1,8 @@
 {
-  "streamers": []
+  "streamers": [
+    { "name": "침착맨", "aliases": ["이말년", "침투부", "병건"], "sources": ["https://www.youtube.com/channel/UCUj6rrhMTR9pipbAWBAMvUQ"] },
+    { "name": "한동숙", "aliases": ["동숙", "칸"], "sources": ["https://www.youtube.com/channel/UCVJT18d9wSCnDUdnJ9ycO7Q"] },
+    { "name": "녹두로", "aliases": ["녹두"], "sources": ["https://www.youtube.com/channel/UC9vz3TBChrJmYbzUo-rqfSg"] },
+    { "name": "아이리 칸나", "aliases": ["칸나", "아이리칸나"], "sources": ["https://www.youtube.com/channel/UCKzfyYWHQ92z_2jUcSABM8Q"] }
+  ]
 }
